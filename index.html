@@ -9,11 +9,10 @@
   <title>ESP32 Monitoring System</title>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     body {
       margin: 0;
@@ -58,6 +57,11 @@
       font-size: 15px;
     }
 
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     .blue {
       background: #2563eb;
       color: white;
@@ -75,10 +79,8 @@
 
     #graphBox {
       display: none;
-    }
-
-    #chart {
-      width: 100%;
+      margin-top: 20px;
+      height: 300px;
     }
   </style>
 </head>
@@ -93,15 +95,15 @@
 <main>
 
   <div class="card">
+    <h2>Միացման կարգավիճակ</h2>
+    <p id="connection">Միացում MQTT սերվերին...</p>
+    <p id="deviceStatus">Սպասում ենք ESP32-ին...</p>
+  </div>
+
+  <div class="card">
     <h2>Ջերմաստիճան</h2>
-
-    <div class="temperature" id="temperature">
-      24.0 °C
-    </div>
-
-    <p id="connection">
-      Դեմո ռեժիմ․ ESP32-ը դեռ միացված չէ
-    </p>
+    <div class="temperature" id="temperature">-- °C</div>
+    <p id="updateTime">Դեռ տվյալներ չկան</p>
   </div>
 
   <div class="card">
@@ -120,14 +122,16 @@
     <h2>Օդափոխիչի կառավարում</h2>
 
     <p id="fanStatus">
-      Օդափոխիչը անջատված է
+      Սպասում ենք սարքի վիճակին...
     </p>
 
-    <button class="green" onclick="fanOn()">
+    <button id="onButton" class="green"
+            onclick="fanOn()" disabled>
       Միացնել
     </button>
 
-    <button class="red" onclick="fanOff()">
+    <button id="offButton" class="red"
+            onclick="fanOff()" disabled>
       Անջատել
     </button>
   </div>
@@ -135,64 +139,231 @@
 </main>
 
 <script>
+  // MQTT settings
+  const MQTT_URL = "wss://broker.emqx.io:8084/mqtt";
 
-  let fan = false;
+  const TOPIC_TEMP =
+    "esp32/lauraa25-9f42c7/temperature";
 
+  const TOPIC_RELAY =
+    "esp32/lauraa25-9f42c7/relay/set";
+
+  const TOPIC_STATE =
+    "esp32/lauraa25-9f42c7/relay/state";
+
+  let brokerConnected = false;
+  let lastTemperatureTime = 0;
+  let relayStateKnown = false;
+  let relayIsOn = false;
+
+  const connectionElement =
+    document.getElementById("connection");
+
+  const deviceElement =
+    document.getElementById("deviceStatus");
+
+  const temperatureElement =
+    document.getElementById("temperature");
+
+  const fanElement =
+    document.getElementById("fanStatus");
+
+  const onButton =
+    document.getElementById("onButton");
+
+  const offButton =
+    document.getElementById("offButton");
+
+  // Temperature chart
   const chart = new Chart(
     document.getElementById("chart"),
     {
       type: "line",
-
       data: {
-        labels: ["0", "1", "2", "3", "4", "5"],
-
+        labels: [],
         datasets: [{
           label: "Ջերմաստիճան °C",
-
-          data: [22, 23, 24, 23, 25, 24],
-
+          data: [],
           borderColor: "#2563eb",
-
-          tension: 0.3
+          backgroundColor: "rgba(37,99,235,0.1)",
+          tension: 0.3,
+          fill: true
         }]
       },
-
       options: {
-        responsive: true
+        responsive: true,
+        maintainAspectRatio: false
       }
     }
   );
 
-  function toggleGraph() {
+  // Connect to MQTT
+  const client = mqtt.connect(MQTT_URL, {
+    clientId: "web-lauraa25-" +
+      Math.random().toString(16).slice(2),
+    clean: true,
+    reconnectPeriod: 3000,
+    connectTimeout: 10000
+  });
 
+  client.on("connect", function() {
+    brokerConnected = true;
+
+    connectionElement.innerText =
+      "MQTT սերվերին միացված է ✅";
+
+    client.subscribe(
+      [TOPIC_TEMP, TOPIC_STATE],
+      function(error) {
+        if (error) {
+          connectionElement.innerText =
+            "Չհաջողվեց բաժանորդագրվել ալիքներին";
+        }
+      }
+    );
+
+    updateDeviceStatus();
+  });
+
+  client.on("close", function() {
+    brokerConnected = false;
+
+    connectionElement.innerText =
+      "MQTT կապն ընդհատվել է";
+
+    updateDeviceStatus();
+  });
+
+  client.on("error", function(error) {
+    console.error("MQTT error:", error);
+
+    connectionElement.innerText =
+      "MQTT միացման սխալ";
+  });
+
+  // Receive ESP32 data
+  client.on("message", function(topic, message) {
+    const value = message.toString();
+
+    if (topic === TOPIC_TEMP) {
+      const temperature = Number(value);
+
+      if (
+        value.trim() !== "" &&
+        Number.isFinite(temperature)
+      ) {
+        lastTemperatureTime = Date.now();
+
+        temperatureElement.innerText =
+          temperature.toFixed(2) + " °C";
+
+        const now = new Date().toLocaleTimeString();
+
+        document.getElementById("updateTime").innerText =
+          "Վերջին թարմացում՝ " + now;
+
+        chart.data.labels.push(now);
+        chart.data.datasets[0].data.push(temperature);
+
+        if (chart.data.labels.length > 30) {
+          chart.data.labels.shift();
+          chart.data.datasets[0].data.shift();
+        }
+
+        chart.update();
+        updateDeviceStatus();
+      }
+    }
+
+    if (topic === TOPIC_STATE) {
+      if (value === "ON" || value === "OFF") {
+        relayStateKnown = true;
+        relayIsOn = value === "ON";
+        updateDeviceStatus();
+      }
+    }
+  });
+
+  function deviceOnline() {
+    return (
+      brokerConnected &&
+      lastTemperatureTime > 0 &&
+      Date.now() - lastTemperatureTime < 8000
+    );
+  }
+
+  function updateDeviceStatus() {
+    const online = deviceOnline();
+
+    if (!brokerConnected) {
+      deviceElement.innerText =
+        "MQTT կապը հասանելի չէ";
+    } else if (online) {
+      deviceElement.innerText =
+        "ESP32-ը ակտիվ է ✅";
+    } else {
+      deviceElement.innerText =
+        "Սպասում ենք ESP32-ի նոր տվյալներին";
+    }
+
+    if (!online) {
+      temperatureElement.innerText = "-- °C";
+      relayStateKnown = false;
+      fanElement.innerText = "Սարքի վիճակը անհայտ է";
+    } else if (relayStateKnown) {
+      fanElement.innerText = relayIsOn
+        ? "Օդափոխիչը միացված է ✅"
+        : "Օդափոխիչը անջատված է";
+    } else {
+      fanElement.innerText =
+        "Սպասում ենք Relay-ի վիճակին...";
+    }
+
+    onButton.disabled = !online;
+    offButton.disabled = !online;
+  }
+
+  setInterval(updateDeviceStatus, 1000);
+
+  function toggleGraph() {
     const graph = document.getElementById("graphBox");
 
     if (graph.style.display === "block") {
       graph.style.display = "none";
     } else {
       graph.style.display = "block";
+      chart.resize();
+    }
+  }
+
+  function sendCommand(command) {
+    if (!deviceOnline()) {
+      alert("ESP32-ը միացված չէ։ Ստուգիր Wokwi-ն։");
+      return;
     }
 
+    fanElement.innerText = "Հրամանն ուղարկվում է...";
+
+    client.publish(
+      TOPIC_RELAY,
+      command,
+      { qos: 0, retain: false },
+      function(error) {
+        if (error) {
+          fanElement.innerText =
+            "Հրամանի ուղարկման սխալ";
+        }
+      }
+    );
   }
 
   function fanOn() {
-
-    fan = true;
-
-    document.getElementById("fanStatus")
-      .innerText = "Օդափոխիչը միացված է (դեմո)";
-
+    sendCommand("ON");
   }
 
   function fanOff() {
-
-    fan = false;
-
-    document.getElementById("fanStatus")
-      .innerText = "Օդափոխիչը անջատված է (դեմո)";
-
+    sendCommand("OFF");
   }
-
 </script>
 
 </body>
