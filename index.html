@@ -1,15 +1,199 @@
+
 <!DOCTYPE html>
 <html lang="hy">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ESP32 Dashboard</title>
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+
+  <title>ESP32 Monitoring System</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f0f4f8;
+      color: #243247;
+    }
+
+    header {
+      background: #172b4d;
+      color: white;
+      padding: 25px;
+      text-align: center;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 15px;
+    }
+
+    .card {
+      background: white;
+      padding: 25px;
+      margin-bottom: 20px;
+      border-radius: 15px;
+      box-shadow: 0 4px 15px #00000012;
+    }
+
+    .temperature {
+      font-size: 45px;
+      color: #2563eb;
+      font-weight: bold;
+    }
+
+    button {
+      padding: 13px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin: 5px;
+      font-size: 15px;
+    }
+
+    .blue {
+      background: #2563eb;
+      color: white;
+    }
+
+    .green {
+      background: #16a34a;
+      color: white;
+    }
+
+    .red {
+      background: #dc2626;
+      color: white;
+    }
+
+    #graphBox {
+      display: none;
+    }
+
+    #chart {
+      width: 100%;
+    }
+  </style>
 </head>
+
 <body>
+
+<header>
   <h1>ESP32 Monitoring System</h1>
-  <h2>Ջերմաստիճան: -- °C</h2>
-  <button>Ցույց տալ գրաֆիկը</button>
-  <button>Միացնել օդափոխիչը</button>
-  <button>Անջատել օդափոխիչը</button>
+  <p>Ջերմաստիճանի մոնիթորինգ և կառավարում</p>
+</header>
+
+<main>
+
+  <div class="card">
+    <h2>Ջերմաստիճան</h2>
+
+    <div class="temperature" id="temperature">
+      24.0 °C
+    </div>
+
+    <p id="connection">
+      Դեմո ռեժիմ․ ESP32-ը դեռ միացված չէ
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Ջերմաստիճանի գրաֆիկ</h2>
+
+    <button class="blue" onclick="toggleGraph()">
+      Ցույց տալ / թաքցնել գրաֆիկը
+    </button>
+
+    <div id="graphBox">
+      <canvas id="chart"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Օդափոխիչի կառավարում</h2>
+
+    <p id="fanStatus">
+      Օդափոխիչը անջատված է
+    </p>
+
+    <button class="green" onclick="fanOn()">
+      Միացնել
+    </button>
+
+    <button class="red" onclick="fanOff()">
+      Անջատել
+    </button>
+  </div>
+
+</main>
+
+<script>
+
+  let fan = false;
+
+  const chart = new Chart(
+    document.getElementById("chart"),
+    {
+      type: "line",
+
+      data: {
+        labels: ["0", "1", "2", "3", "4", "5"],
+
+        datasets: [{
+          label: "Ջերմաստիճան °C",
+
+          data: [22, 23, 24, 23, 25, 24],
+
+          borderColor: "#2563eb",
+
+          tension: 0.3
+        }]
+      },
+
+      options: {
+        responsive: true
+      }
+    }
+  );
+
+  function toggleGraph() {
+
+    const graph = document.getElementById("graphBox");
+
+    if (graph.style.display === "block") {
+      graph.style.display = "none";
+    } else {
+      graph.style.display = "block";
+    }
+
+  }
+
+  function fanOn() {
+
+    fan = true;
+
+    document.getElementById("fanStatus")
+      .innerText = "Օդափոխիչը միացված է (դեմո)";
+
+  }
+
+  function fanOff() {
+
+    fan = false;
+
+    document.getElementById("fanStatus")
+      .innerText = "Օդափոխիչը անջատված է (դեմո)";
+
+  }
+
+</script>
+
 </body>
 </html>
